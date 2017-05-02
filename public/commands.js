@@ -471,8 +471,23 @@ var COMMANDS = {
         params : ['ip']
     },
     refresh : {},
-    access : {
-        params : ['nick', 'role']
+    grant : {
+        params : ['role', 'role|permission'],
+    },
+    revoke : {
+        params : ['role', 'role|permission'],
+    },
+    can : {
+        params : ['role', 'action', 'resource']
+    },
+    has : {
+        params : ['role', 'child_role']
+    },
+    cans : {
+        params : ['role']
+    },
+    grants : {
+        params : ['role']
     },
     pm : {
         params : ['nick|message']
