@@ -490,6 +490,8 @@ var COMMANDS = {
     grants : {
         params : ['role']
     },
+    roles : {},
+    perms : {},
     pm : {
         params : ['nick|message']
     },

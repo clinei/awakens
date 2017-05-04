@@ -5,7 +5,6 @@ var _ = require('underscore');
 var express = require('express');
 var fs = require('fs');
 var access = require('./access');
-var RBAC = require('rbac');
 
 var channels = {};
 var tokens = {};
@@ -13,7 +12,9 @@ var tokens = {};
 /*
 TODO: investigate user /nick to existing non-nick role
 TODO: dependecies pass like in plugin system, through params
-TODO: /roles and /perms commands
+TODO: transfer grants on /nick, don't just assign `basic`
+TODO: add revoking a role from another with exclusions or denormalizing the other permissions (one becomes children minus revoked)
+OR keep it denormalized
 */
 
 function handleException(err) {
@@ -61,7 +62,7 @@ function createChannel(io, channelName) {
         messageCount : 0
     };
 
-    access.defaultRules.storage = new RBAC.MySQL(dao.settings);
+    access.defaultRules.storage = new access.MySQLStorage(dao.settings);
     var rbac = new access.RBAC(access.defaultRules);
     var role_basic;
     // BUGS: race condition
@@ -586,54 +587,56 @@ function createChannel(io, channelName) {
         grant : {
             params : ['role', 'role|permission'],
             permissions : [['grant', 'permission']],
-            handler : function grant(user, params) {
-                Promise.all([
-                    access.ensureRoleExists(rbac, params.role),
-                    rbac.getPromise(params['role|permission'])
-                ]).then(function (values) {
-                    const role = values[0],
-                          role_or_permission = values[1];
+            handler : function grant (user, params) {
+                var message = {
+                    type: 'info'
+                };
+                function finalize () {
+                    showMessage(user.socket, message.text, message.type);
+                }
 
-                    // TODO: copy this
-                    Promise.resolve(new Promise(function (resolve, reject) {
-                        var message = {
-                            type: 'info'
-                        };
+            	if (params.role === params['role|permission']) {
+            		message.text = "can't grant a role itself";
+            		message.type = 'error';
+                    finalize();
+            	} else {
+	                Promise.all([
+	                    access.ensureRoleExists(rbac, params.role),
+	                    rbac.getPromise(params['role|permission'])
+	                ]).then(function (values) {
+	                    const role = values[0],
+	                          role_or_permission = values[1];
 
-                        if (role) {
-                            if (role_or_permission) {
-                                rbac.grant(role, role_or_permission, function (err, success) {
+	                    // TODO: copy this
+	                    Promise.resolve(new Promise(function (resolve, reject) {
+	                        if (role) {
+	                            if (role_or_permission) {
+	                                rbac.grant(role, role_or_permission, function (err, success) {
+	                                    if (success) {
+	                                        message.text = params.role + ' has been granted ' + params['role|permission'];
+	                                    } else {
+	                                        message.text = "can't grant " + params.role + ' ' + params['role|permission'];
+	                                    }
 
-                                    if (success) {
-                                        message.text = params.role + ' has been granted ' + params['role|permission'];
-                                    } else {
-                                        message.text = "can't grant " + params.role + ' ' + params['role|permission'];
-                                    }
-
-                                    resolve(message);
-                                });
-                            } else {
-                                message.text = 'role|permission ' + params['role|permission'] + " doesn't exist";
-                                resolve(message);
-                            }
-                        } else {
-                            message.text = 'role for ' + params.nick + " doesn't exist";
-                            resolve(message);
-                        }
-                    })).then(function (message) {
-                        if (!message.hasOwnProperty('type')) {
-                            message.type = 'info';
-                        }
-                        showMessage(user.socket, message.text, message.type);
-                    });
-                });
+	                                    resolve();
+	                                });
+	                            } else {
+	                                message.text = 'role|permission ' + params['role|permission'] + " doesn't exist";
+	                                resolve();
+	                            }
+	                        } else {
+	                            message.text = 'role for ' + params.role + " doesn't exist";
+	                            resolve();
+	                        }
+	                    })).then(finalize).catch(finalize);
+	                });
+	            }
             }
         },
-        // TODO: add revoking a role from another role while keeping the other permissions (one becomes many)
         revoke : {
             params : ['role', 'role|permission'],
             permissions : [['revoke', 'permission']],
-            handler : function revoke(user, params) {
+            handler : function revoke (user, params) {
                 Promise.all([
                     access.ensureRoleExists(rbac, params.role),
                     rbac.getPromise(params['role|permission'])
@@ -660,7 +663,7 @@ function createChannel(io, channelName) {
                             message.text = 'role|permission ' + params['role|permission'] + " doesn't exist";
                         }
                     } else {
-                        message.text = 'role for nick ' + params.role + " doesn't exist";
+                        message.text = 'role for ' + params.role + " doesn't exist";
                     }
 
                     showMessage(user.socket, message.text, message.type);
@@ -669,7 +672,7 @@ function createChannel(io, channelName) {
         },
         can : {
             params : ['role', 'action', 'resource'],
-            handler : function can(user, params) {
+            handler : function can (user, params) {
                 rbac.canPromise(params.role, params.action, params.resource).then(function callback_can (err, can) {
                     var message = params.role;
                     if (can) {
@@ -684,7 +687,7 @@ function createChannel(io, channelName) {
         },
         has : {
             params : ['role', 'child_role'],
-            handler : function has(user, params) {
+            handler : function has (user, params) {
                 rbac.hasRole(params.role, params.child_role, function callback_has (err, has) {
                     var message = params.role;
                     if (has) {
@@ -699,16 +702,22 @@ function createChannel(io, channelName) {
         },
         cans : {
             params : ['role'],
-            handler : function cans(user, params) {
+            handler : function cans (user, params) {
+                // TODO: fix bug here when user has no grants and /cans is done 
                 rbac.getScope(params.role, function callback_getScope (err, cans) {
-                    var message = params.role + ' can ' + cans.join(", ");
+                    var message = 'this is a bug';
+                    if (err) {
+                        message = 'error on /cans ' + params.role;
+                    } else {
+                        message = params.role + ' can ' + cans.join(", ");
+                    }
                     showMessage(user.socket, message, 'info');
                 });
             }
         },
         grants : {
             params : ['role'],
-            handler : function grants(user, params) {
+            handler : function grants (user, params) {
                 rbac.storage.getGrants(params.role, function callback_getGrants (err, grants) {
                     var message = 'grants for ' + params.role + ': ';
 
@@ -723,12 +732,43 @@ function createChannel(io, channelName) {
                 });
             }
         },
-        // TODO: command for seeing all permissions
-        /*
-        perms : {
-            ;
+        roles : {
+            handler : function roles (user) {
+                rbac.storage.getRoles(function callback_getRoles (err, roles) {
+                    var message = 'available roles: ';
+                    // TODO: remove nicks from roles
+
+                    if (!err && roles) {
+                        roles.forEach(function (role, i) {
+                        	if (role.is_nick) {
+                        		delete roles[i];
+	                        } else {
+	                            roles[i] = role.name;
+	                        }
+                        });
+                        message += roles.join(", ");
+                    }
+
+                    showMessage(user.socket, message, 'info');
+                });
+            }
         },
-        */
+        perms : {
+            handler : function perms (user) {
+                rbac.storage.getPermissions(function callback_getPermissions (err, perms) {
+                    var message = 'available permissions: ';
+
+                    if (!err && perms) {
+                        perms.forEach(function (perm, i) {
+                            perms[i] = perm.name;
+                        });
+                        message += perms.join(", ");
+                    }
+
+                    showMessage(user.socket, message, 'info');
+                });
+            }
+        },
         pm : {
             params : ['nick', 'message'],
             permissions : [['send', 'pm']],
@@ -1169,7 +1209,11 @@ function createChannel(io, channelName) {
                 if (notSpam) {
                     if (typeof commandName === 'string' && COMMANDS[commandName]) {
                         if (!params || typeof params === 'object') {
-                            handleCommand(COMMANDS[commandName], params);
+                        	try {
+	                            handleCommand(COMMANDS[commandName], params);
+	                        } catch (err) {
+	                        	showMessage(user.socket, 'Error while handling command', 'error');
+	                        }
                         }
                     }
                 } else {
