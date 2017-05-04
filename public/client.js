@@ -262,7 +262,7 @@ function showMessage(messageData, panel, img) {
     var blockUsers = Attributes.get('blocked') || [],
         userID = ONLINE.getId(messageData.nick);
     
-    if (blockUsers.indexOf(messageData.nick) === -1) {
+    if (blockUsers.indexOf(messageData.nick) === -1 && messageData.message) {
         var messageHTML = messageBuilder.createMessage(messageData.message, messageData.messageType, messageData.nick, messageData.flair, messageData.count, messageData.hat);
         
         if (messageData.messageType && messageData.messageType === 'personal' && messageData.nick !== Attributes.get('nick')) {

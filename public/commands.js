@@ -9,6 +9,7 @@ var COMMANDS = {
             var keys = Object.keys(COMMANDS);
             var ava = [];
             keys.forEach(function(key){
+                // TODO: remove old role
                 if(Attributes.get('role') <= COMMANDS[key].role || COMMANDS[key].role === undefined){
                     ava.push(key);
                 }

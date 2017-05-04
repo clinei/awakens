@@ -1,9 +1,9 @@
 var _ = require('underscore');
-var $ = require('jquery-deferred');
 var mysql = require('mysql');
 var bcrypt = require('bcrypt-nodejs');
 var fs = require('fs');
 
+var settings;
 try {
     var file = fs.readFileSync('./conf/settings.json');
     settings = JSON.parse(file.toString());
@@ -47,221 +47,207 @@ function findIndex(channel, att, value) {
 }
 
 module.exports = {
+    settings: settings,
     encrypt : function(password){
-        var defer = $.Deferred();
-        bcrypt.genSalt(10, function(err, salt){
-            bcrypt.hash(password, salt, null, function(err, hash){
-                defer.resolve(hash).promise();
+        return new Promise(function (resolve, reject) {
+            bcrypt.genSalt(10, function(err, salt){
+                bcrypt.hash(password, salt, null, function(err, hash){
+                    resolve(hash);
+                });
             });
         });
-        return defer;
     },
     register : function (nick, password, ip) {
-        var defer = $.Deferred();
-        var sql = "INSERT INTO `awakens`.`users`(`nick`,`password`,`remote_addr`,`role`) VALUES(?,?,?,?)";
-        bcrypt.genSalt(10, function (err, salt) {
-            bcrypt.hash(password, salt, null, function (err, hash) {
-                db.query(sql, [nick, hash, ip, 4], function (err, rows, fields) {
-                    if (err) {
-                        defer.reject(err);
-                    } else {
-                        defer.resolve().promise();
-                    }
+        return new Promise(function (resolve, reject) {
+            var sql = "INSERT INTO `awakens`.`users`(`nick`,`password`,`remote_addr`) VALUES(?,?,?)";
+            bcrypt.genSalt(10, function (err, salt) {
+                bcrypt.hash(password, salt, null, function (err, hash) {
+                    db.query(sql, [nick, hash, ip], function (err, rows, fields) {
+                        if (err) {
+                            reject(err);
+                        } else {
+                            resolve();
+                        }
+                    });
                 });
             });
         });
-        return defer;
     },
     unregister : function(nick){
-        var defer = $.Deferred();
-        var sql = "DELETE FROM `awakens`.`users` WHERE `nick` = ?";
-        db.query(sql, nick, function(err, rows, fields){
-            if (err) {
-                defer.reject();
-            }  else {
-                defer.resolve().promise();
-            }
+        return new Promise(function (resolve, reject) {
+            var sql = "DELETE FROM `awakens`.`users` WHERE `nick` = ?";
+            db.query(sql, nick, function(err, rows, fields){
+                if (err) {
+                    reject();
+                }  else {
+                    resolve();
+                }
+            });
         });
-        return defer;
     },
     login : function (nick, password) {
-        var defer = $.Deferred();
-        var sql = "SELECT * FROM `users` WHERE `nick` = ?";
-        db.query(sql, nick, function (err, rows, fields) {
-            if (rows && rows.length) {
-                bcrypt.compare(password, rows[0].password, function (err, res) {//check if password is correct
-                    defer.resolve(res, rows[0]).promise();
-                });
-            } else {//not an account
-                defer.reject();
-            }
+        return new Promise(function (resolve, reject) {
+            var sql = "SELECT * FROM `users` WHERE `nick` = ?";
+            db.query(sql, nick, function (err, rows, fields) {
+                if (rows && rows.length) {
+                    bcrypt.compare(password, rows[0].password, function (err, res) {//check if password is correct
+                        resolve(res, rows[0]);
+                    });
+                } else {//not an account
+                    reject();
+                }
+            });
         });
-        return defer;
     },
     find : function (nick) {
-        var defer = $.Deferred();
-        var sql = "SELECT * FROM `users` WHERE `nick` = ?";
-        db.query(sql, nick, function (err, rows, fields) {
-            if (rows && rows.length) {
-                defer.resolve(rows[0]).promise();
-            } else {
-                defer.reject();
-            }
+        return new Promise(function (resolve, reject) {
+            var sql = "SELECT * FROM `users` WHERE `nick` = ?";
+            db.query(sql, nick, function (err, rows, fields) {
+                if (rows && rows.length) {
+                    resolve(rows[0]);
+                } else {
+                    reject();
+                }
+            });
         });
-        return defer;
     },
     findip : function(ip) {
-        var defer = $.Deferred();
-        var sql = "SELECT * FROM `users` WHERE `remote_addr` = ?";
-        db.query(sql, ip, function (err, rows, fields) {
-            var nicks = [];
-            if (rows) {
-                rows.forEach(function (i) {
-                    nicks.push(i.nick);
-                });
-            }
-            defer.resolve(nicks).promise();
+        return new Promise(function (resolve, reject) {
+            var sql = "SELECT * FROM `users` WHERE `remote_addr` = ?";
+            db.query(sql, ip, function (err, rows, fields) {
+                var nicks = [];
+                if (rows) {
+                    rows.forEach(function (i) {
+                        nicks.push(i.nick);
+                    });
+                }
+                resolve(nicks);
+            });
         });
-        return defer;
     },
     getChannelinfo : function (channelName) {
-        var defer = $.Deferred();
-        var sql = "SELECT * FROM `channel_info` WHERE `channelName` = ?";
-        db.query(sql, channelName, function (err, rows, fields) {
-            if (rows && rows.length) {
-                try {
-                    defer.resolve(JSON.parse(rows[0].roles), JSON.parse(rows[0].data)).promise();
-                } catch (err) {
-                    defer.reject(err);
+        return new Promise(function (resolve, reject) {
+            var sql = "SELECT * FROM `channel_info` WHERE `channelName` = ?";
+            db.query(sql, channelName, function (err, rows, fields) {
+                if (rows && rows.length) {
+                    try {
+                        resolve({
+                            roles: JSON.parse(rows[0].roles),
+                            data: JSON.parse(rows[0].data)
+                        });
+                    } catch (err) {
+                        reject(err);
+                    }
+                } else {
+                    db.query("INSERT INTO `awakens`.`channel_info` (`channelName`, `roles`, `data`) VALUES (?, '{}', '{}');", channelName, function (err, rows, fields) {
+                        resolve();
+                    });
                 }
-            } else {
-                db.query("INSERT INTO `awakens`.`channel_info` (`channelName`, `roles`, `data`) VALUES (?, '{}', '{}');", channelName, function (err, rows, fields) {
-                    defer.resolve({}, {}).promise();
-                });
-            }
+            });
         });
-        return defer;
     },
     getChannelAtt : function (channelName, att) {
-        var defer = $.Deferred();
-        this.getChannelinfo(channelName).then(function (roles, channelData) {
-            defer.resolve(channelData[att]).promise();
+        return new Promise(function (resolve, reject) {
+            this.getChannelinfo(channelName).then(function (roles, channelData) {
+                resolve(channelData[att]);
+            });
         });
-        return defer;
     },
-    setChannelinfo : function (channelName, newValues){
-        var defer = $.Deferred(),
-            sql = "UPDATE `awakens`.`channel_info` SET `data` = ? WHERE `channel_info`.`channelName` = ?",
-            keys = Object.keys(newValues),
-            i;
-        
-        this.getChannelinfo(channelName).then(function (roles, channelData) {
+    setChannelinfo : function (channelName, newValues) {
+        return new Promise(function (resolve, reject) {
+            var sql = "UPDATE `awakens`.`channel_info` SET `data` = ? WHERE `channel_info`.`channelName` = ?",
+                keys = Object.keys(newValues),
+                i;
             
-            for (i = 0; i < keys.length; i++) {
-                channelData[keys[i]] = newValues[keys[i]];
-            }
-            
-            db.query(sql, [JSON.stringify(channelData), channelName], function(err, rows, fields){
-                if (err) {
-                    defer.reject(err);
-                } else {
-                    defer.resolve().promise();   
+            this.getChannelinfo(channelName).then(function (roles, channelData) {
+                for (i = 0; i < keys.length; i++) {
+                    channelData[keys[i]] = newValues[keys[i]];
                 }
-            });
-        }).fail(function () {
-            channelData = {};
-            channelData[att] = value;
-            db.query("INSERT INTO `awakens`.`channel_info` (`channelName`, `roles`, `data`) VALUES (?, '{}', ?);", [channelName, JSON.stringify(channelData)]);
-            defer.resolve().promise();   
-        });
-        return defer;
-    },
-    setChannelRole : function (channelName, nick, role) {
-        var defer = $.Deferred();
-        var sql = "UPDATE `awakens`.`channel_info` SET `roles` = ? WHERE `channel_info`.`channelName` = ?";
-        this.getChannelinfo(channelName).then(function (roles) {
-            if (role === 4) {
-                delete roles[nick];
-            } else {
-                roles[nick] = role;
-            }
-            db.query(sql, [JSON.stringify(roles), channelName], function (err, rows, fields) {
-                defer.resolve().promise();
+                
+                db.query(sql, [JSON.stringify(channelData), channelName], function(err, rows, fields){
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();   
+                    }
+                });
+            }).catch(function () {
+                channelData = {};
+                channelData[att] = value;
+                db.query("INSERT INTO `awakens`.`channel_info` (`channelName`, `roles`, `data`) VALUES (?, '{}', ?);", [channelName, JSON.stringify(channelData)]);
+                resolve();   
             });
         });
-        return defer;
     },
     setUserinfo : function (nick, att, value) {
-        var defer = $.Deferred();
-        var sql = "UPDATE `awakens`.`users` SET ?? = ? WHERE `nick` = ?";
-        
-        if (typeof value !== 'string') {
-            value = JSON.stringify(value);
-        }
-        
-        db.query(sql, [att, value, nick], function (err, rows, fields) {
-            if (err) {
-                defer.reject(err);
-            } else {
-                defer.resolve().promise();
+        return new Promise(function (resolve, reject) {
+            var sql = "UPDATE `awakens`.`users` SET ?? = ? WHERE `nick` = ?";
+            
+            if (typeof value !== 'string') {
+                value = JSON.stringify(value);
             }
+            
+            db.query(sql, [att, value, nick], function (err, rows, fields) {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve();
+                }
+            });
         });
-        return defer;
     },
     banlist : function(channelName) {
-        var defer = $.Deferred();
-        var sql = "SELECT * FROM `channel_banned` WHERE `channelName` = ?;"
-        db.query(sql, channelName, function (err, rows, fields) {
-            var banlist = [],
-                rows;
-            
-            if(rows && rows.length){
-                rows = JSON.parse(rows[0].banned);
-                for(var i = 0; i < rows.length; i++){
-                    banlist.push(rows[i].nick);
+        return new Promise(function (resolve, reject) {
+            var sql = "SELECT * FROM `channel_banned` WHERE `channelName` = ?;"
+            db.query(sql, channelName, function (err, rows, fields) {
+                var banlist = [],
+                    rows;
+                
+                if(rows && rows.length){
+                    rows = JSON.parse(rows[0].banned);
+                    for(var i = 0; i < rows.length; i++){
+                        banlist.push(rows[i].nick);
+                    }
+                    resolve(banlist, rows);
+                } else {
+                    db.query("INSERT INTO `awakens`.`channel_banned` (`channelName`, `banned`) VALUES (?, '[]');", channelName);
+                    resolve([]);
                 }
-                defer.resolve(banlist, rows).promise();
-            } else {
-                db.query("INSERT INTO `awakens`.`channel_banned` (`channelName`, `banned`) VALUES (?, '[]');", channelName);
-                defer.resolve([]).promise();
-            }
+            });
         });
-        return defer;
     },
     ban : function(channelName, nick, bannedBy, reason){
-        var defer = $.Deferred();
-        var sql = "UPDATE `awakens`.`channel_banned` SET `banned` = ? WHERE `channelName` = ?;";
-        this.banlist(channelName).then(function(banlist, banData){
-            if (banlist.indexOf(nick) === -1) {
-                banData.push({
-                    nick : nick,
-                    bannedBy : bannedBy, 
-                    reason : reason
-                });
-                db.query(sql, [JSON.stringify(banData), channelName],function(err, rows, fields){
-                    defer.resolve().promise();
-                });
-            } else {
-                defer.reject();
-            }
-        });
-        return defer;
+        return new Promise(function (resolve, reject) {
+            var sql = "UPDATE `awakens`.`channel_banned` SET `banned` = ? WHERE `channelName` = ?;";
+            this.banlist(channelName).then(function(banlist, banData){
+                if (banlist.indexOf(nick) === -1 && banData instanceof Array) {
+                    banData.push({
+                        nick : nick,
+                        bannedBy : bannedBy, 
+                        reason : reason
+                    });
+                    db.query(sql, [JSON.stringify(banData), channelName],function(err, rows, fields){
+                        resolve();
+                    });
+                }
+            });
+        }.bind(this));
     },
     unban : function(channelName, nick) {
-        var defer = $.Deferred();
-        var sql = "UPDATE `awakens`.`channel_banned` SET `banned` = ? WHERE `channelName` = ?;";
-        this.banlist(channelName).then(function (banlist, banData) {
-            var index = findIndex(banData, 'nick', nick);
-            if (index !== -1) {
-                banData.splice(index, 1);
-                db.query(sql, [JSON.stringify(banData), channelName],function(err, rows, fields){
-                    defer.resolve().promise();
-                });
-            } else {
-                defer.reject();
-            }
+        return new Promise(function (resolve, reject) {
+            var sql = "UPDATE `awakens`.`channel_banned` SET `banned` = ? WHERE `channelName` = ?;";
+            this.banlist(channelName).then(function (banlist, banData) {
+                var index = findIndex(banData, 'nick', nick);
+                if (index !== -1) {
+                    banData.splice(index, 1);
+                    db.query(sql, [JSON.stringify(banData), channelName],function(err, rows, fields){
+                        resolve();
+                    });
+                } else {
+                    reject();
+                }
+            });
         });
-        return defer;
     },
     getNick : function () {
         var nouns = ["alien", "apparition", "bat", "blood", "bogeyman", "boogeyman", "boo", "bone", "cadaver", "casket", "cauldron", "cemetery", "cobweb", "coffin", "corpse", "crypt", "darkness", "dead", "demon", "devil", "death", "eyeball", "fangs", "fear", "gastly", "gengar", "ghost", "ghoul", "goblin", "grave", "gravestone", "grim", "grimreaper", "gruesome", "haunter", "headstone", "hobgoblin", "hocuspocus", "howl", "jack-o-lantern", "mausoleum", "midnight", "monster", "moon", "mummy", "night", "nightmare", "ogre", "phantasm", "phantom", "poltergeist", "pumpkin", "scarecrow", "scream", "shadow", "skeleton", "skull", "specter", "spider", "spine", "spirit", "spook", "tarantula", "tomb", "tombstone", "troll", "vampire", "werewolf", "witch", "washer", "witchcraft", "wraith", "zombie"];
